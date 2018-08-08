@@ -32,3 +32,8 @@
    -fixed bug related to computing fermat remainder
 
    -added base offset to offsets.ini to enable different primorial offset patterns
+
+08/08/18
+
+		-got rid of remaining cruft files and built custom makefile for linux
+

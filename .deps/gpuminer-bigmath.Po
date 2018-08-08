@@ -1,5 +1,0 @@
-gpuminer-bigmath.o: bigmath.cpp /usr/include/stdc-predef.h bigmath.h
-
-/usr/include/stdc-predef.h:
-
-bigmath.h:
