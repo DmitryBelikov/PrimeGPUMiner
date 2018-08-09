@@ -5,7 +5,12 @@
  [Scale Indefinitely] BlackJack. http://www.opensource.org/licenses/mit-license.php
   
 *******************************************************************************************/
-extern int device_map[8];
+#ifndef CUDA_SIEVE_H
+#define CUDA_SIEVE_H
+
+#include "frame_resources.h"
+
+extern int device_map[GPU_MAX];
 
 extern "C" int cuda_num_devices();
 
@@ -56,4 +61,4 @@ extern "C" void cuda_device_synchronize();
 extern "C" void cuda_init_sieve(uint32_t thr_id);
 extern "C" void cuda_free_sieve(uint32_t thr_id);
 
-
+#endif

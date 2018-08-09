@@ -8,14 +8,12 @@
 #ifndef FERMAT_H
 #define FERMAT_H
 
+#include <stdint.h>
 
 #define WORD_MAX 32
 
 
 struct uint1024;
-
-typedef unsigned uint32_t;
-typedef unsigned long uint64_t;
 
 extern "C" void cuda_init_fermat(uint32_t thr_id);
 extern "C" void cuda_free_fermat(uint32_t thr_id);

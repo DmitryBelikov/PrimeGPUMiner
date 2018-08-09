@@ -21,26 +21,26 @@ extern cudaEvent_t d_compact_Event[GPU_MAX][FRAME_COUNT];
 __constant__ uint32_t c_offsets[32];
 static uint32_t nOffsetsTest;
 
-__host__ __device__ void print_hex(uint32_t *p)
-{
-  for(int i = 0; i < WORD_MAX; ++i)
-    printf("%08X\n", p[i]);
+//__host__ __device__ void print_hex(uint32_t *p)
+//{
+//  for(int i = 0; i < WORD_MAX; ++i)
+//    printf("%08X\n", p[i]);
 
-  printf("\n");
-}
+//  printf("\n");
+//}
 
-__device__ void print_hex2(uint32_t *a, uint32_t *b)
-{
-  for(int j = 0; j < WORD_MAX; ++j)
-  {
-   char c = a[j] > b[j] ? '>' : a[j] == b[j] ? '=' : '<';
+//__device__ void print_hex2(uint32_t *a, uint32_t *b)
+//{
+//  for(int j = 0; j < WORD_MAX; ++j)
+//  {
+//   char c = a[j] > b[j] ? '>' : a[j] == b[j] ? '=' : '<';
 
-    printf("%d\t%08X", j, a[j]);
-    printf("\t%c", c);
-    printf("\t%08X\n", b[j]);
-  }
-  printf("\n");
-}
+//    printf("%d\t%08X", j, a[j]);
+//    printf("\t%c", c);
+//    printf("\t%08X\n", b[j]);
+//  }
+//  printf("\n");
+//}
 
 extern "C" void cuda_set_FirstSieveElement(uint32_t thr_id, uint32_t *limbs)
 {

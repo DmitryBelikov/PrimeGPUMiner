@@ -35,5 +35,16 @@
 
 08/08/18
 
-		-got rid of remaining cruft files and built custom makefile for linux
+	 -got rid of remaining cruft files and built custom makefile for linux
 
+08/09/18
+
+   -changed bit array radix from 8-bit to 32-bit to eliminate uneeded casting and
+    code cleanliness
+
+   -got rid of typedefs for uint32_t and uint64_t as they introduce compile problems
+    for Windows. cleaned up some misc. code
+
+   -added Mixed GPU support (CUDA only)
+
+   -added up to 32 GPU support (for those with ridiculous mining rigs)

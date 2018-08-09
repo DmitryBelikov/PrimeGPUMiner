@@ -25,14 +25,14 @@ FILE _iob[] = { *stdin, *stdout, *stderr };
 extern "C" FILE * __cdecl __iob_func(void) { return _iob; }
 #endif
 
-volatile unsigned int nBlocksFoundCounter = 0;
-volatile unsigned int nBlocksAccepted = 0;
-volatile unsigned int nBlocksRejected = 0;
-volatile unsigned int nDifficulty = 0;
-volatile unsigned int nBestHeight = 0;
-extern volatile unsigned int nInternalPrimeLimit;
+volatile uint32_t nBlocksFoundCounter = 0;
+volatile uint32_t nBlocksAccepted = 0;
+volatile uint32_t nBlocksRejected = 0;
+volatile uint32_t nDifficulty = 0;
+volatile uint32_t nBestHeight = 0;
+extern volatile uint32_t nInternalPrimeLimit;
 volatile bool isBlockSubmission = false;
-unsigned int nStartTimer = 0;
+uint32_t nStartTimer = 0;
 std::atomic<uint64_t> SievedBits;
 std::atomic<uint64_t> Tests_CPU;
 std::atomic<uint64_t> Tests_GPU;
@@ -166,7 +166,7 @@ namespace Core
 		LLP::Thread_t THREAD;
 		boost::mutex MUTEX;
 
-		unsigned int nSearches;
+		uint32_t nSearches;
 		
 		MinerThreadCPU(int tid, int affinity) 
     : threadIndex(tid)
@@ -303,7 +303,7 @@ namespace Core
 					
 					
 					/** Check the Block Height. **/
-					unsigned int nHeight = CLIENT->GetHeight(nTimeout);
+					uint32_t nHeight = CLIENT->GetHeight(nTimeout);
 					if(nHeight == 0)
 					{
 						printf("Failed to Update Height...\n");
@@ -542,9 +542,12 @@ int main(int argc, char *argv[])
 
 	std::string IP = argv[1];
 	std::string PORT = argv[2];
-	unsigned int nThreadsGPU = GetTotalCores();
-  unsigned int nThreadsCPU = 6;
-	unsigned int nTimeout = 10;
+	uint32_t nThreadsGPU = GetTotalCores();
+  uint32_t nThreadsCPU = 6;
+	uint32_t nTimeout = 10;
+
+  for(int i = 0; i < GPU_MAX; ++i) //initialize device map
+    device_map[i] = i;
 	
 	if(argc > 3) {
 		int num_processors = nThreadsGPU;
@@ -630,7 +633,7 @@ int main(int argc, char *argv[])
 
 	Core::InitializePrimes();
 
-	nStartTimer = (unsigned int)time(0);
+	nStartTimer = (uint32_t)time(0);
 	printf("Initializing Miner %s:%s Threads = %i, Timeout = %i\n", 
     IP.c_str(), PORT.c_str(), nThreadsGPU, nTimeout);
 

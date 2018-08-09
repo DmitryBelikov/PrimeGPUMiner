@@ -52,7 +52,7 @@ uint32_t mod_p_small(uint64_t a, uint32_t p, uint64_t recip)
 	return (uint32_t)r;
 }
 
-int device_map[GPU_MAX] = {0,1,2,3,4,5,6,7};
+int device_map[GPU_MAX] = {0};
 
 extern "C" void cuda_reset_device()
 {
@@ -364,7 +364,7 @@ uint32_t nPrimeLimitA, uint32_t offsetsA)
 }
 
 template<uint32_t sharedSizeKB, uint32_t nThreadsPerBlock, uint32_t offsetsA>
-__global__ void primesieve_kernelA(uint8_t *g_bit_array_sieve, uint32_t nBitArray_Size, uint4 *primes, uint16_t *prime_remainders, uint32_t *base_remainders, uint32_t nPrimorialEndPrime, uint32_t nPrimeLimitA)
+__global__ void primesieve_kernelA(uint32_t *g_bit_array_sieve, uint32_t nBitArray_Size, uint4 *primes, uint16_t *prime_remainders, uint32_t *base_remainders, uint32_t nPrimorialEndPrime, uint32_t nPrimeLimitA)
 {
 	extern __shared__ uint32_t shared_array_sieve[];
 
@@ -421,7 +421,7 @@ __global__ void primesieve_kernelA(uint8_t *g_bit_array_sieve, uint32_t nBitArra
     {
 			uint32_t tmp = pre1[o] + pre2;
 			tmp = (tmp >= pr) ? (tmp - pr) : tmp;
-			for(uint32_t index = tmp + pIdx; index < sizeSieve; index+= nAdd)				
+			for(uint32_t index = tmp + pIdx; index < sizeSieve; index += nAdd)				
 				atomicOr(&shared_array_sieve[index >> 5], 1 << (index & 31));
 		};
 
@@ -429,7 +429,7 @@ __global__ void primesieve_kernelA(uint8_t *g_bit_array_sieve, uint32_t nBitArra
 	}
 
 	__syncthreads();
-	g_bit_array_sieve += sharedSizeBytes * blockIdx.x;
+	g_bit_array_sieve += (sharedSizeBytes * blockIdx.x) >> 2;
 
 //	if (sharedSizeKB == 32 && nThreadsPerBlock == 1024) 
 //  {
@@ -452,12 +452,12 @@ __global__ void primesieve_kernelA(uint8_t *g_bit_array_sieve, uint32_t nBitArra
 		for (int i = 0; i < 8192; i += 512) // fixed value
 		{	
       j = threadIdx.x + i;
-      ((uint32_t*)g_bit_array_sieve)[j] = shared_array_sieve[j];
+      g_bit_array_sieve[j] = shared_array_sieve[j];
     }
 //}
 }
 
-__global__ void primesieve_kernelB(uint8_t *g_bit_array_sieve, 
+__global__ void primesieve_kernelB(uint32_t *g_bit_array_sieve, 
                                    uint32_t nBitArray_Size, 
                                    uint4 *primes, 
                                    uint32_t *base_remainders, 
@@ -471,7 +471,6 @@ __global__ void primesieve_kernelB(uint8_t *g_bit_array_sieve,
 	uint32_t o = position & 0x7; //can only be one of 8 offsets
 	if ( i < nPrimeLimit && o < offsetsB)
 	{
-		uint32_t *g_word_array_sieve = (uint32_t*)g_bit_array_sieve;
 		uint4 tmp = primes[i];
 
 		uint32_t p = tmp.x;
@@ -482,7 +481,7 @@ __global__ void primesieve_kernelB(uint8_t *g_bit_array_sieve,
 
 		for (; index < nBitArray_Size; index += p)
 		{
-			atomicOr(&g_word_array_sieve[index >> 5], 1 << (index & 31));
+			atomicOr(&g_bit_array_sieve[index >> 5], 1 << (index & 31));
 		}
 	}
 }
@@ -656,16 +655,15 @@ extern "C" void cuda_set_offsets(uint32_t thr_id, uint32_t *OffsetsA, uint32_t A
 }
 
 __global__ void compact_offsets(uint64_t *d_nonce_offsets, uint32_t *d_nonce_meta, uint32_t *d_nonce_count, 
-                                uint8_t *d_bit_array_sieve, uint32_t max_count, uint64_t sieve_start_index)
+                                uint32_t *d_bit_array_sieve, uint32_t max_count, uint64_t sieve_start_index)
 {
   uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if(idx < max_count)
   {
-    uint32_t *d_word_array_sieve = (uint32_t *)d_bit_array_sieve;
     uint64_t nonce_offset = sieve_start_index + idx;
 
-    if((d_word_array_sieve[idx >> 5] & (1 << (idx & 31))) == 0)
+    if((d_bit_array_sieve[idx >> 5] & (1 << (idx & 31))) == 0)
     {
       atomicMin(d_nonce_count, OFFSETS_MAX);
       uint32_t i = atomicAdd(d_nonce_count, 1);

@@ -29,11 +29,11 @@ CUDA_LIB := -L$(CUDA_PATH)/lib64 -lcudadevrt -lcudart -lcuda
 CUDA_INC += -I$(CUDA_PATH)/include
 
 CFLAGS   := -std=c++0x
-CXXFLAGS := -std=c++11 -msse2 -fopenmp -pthread -fno-strict-aliasing -fpermissive -g -O2
+CXXFLAGS := -std=c++11 -msse2 -pthread -O2
 INCLUDES := #specify include path for host code
 
 GPU_CARD := -arch=sm_35
-NVCC_FLAGS += -std=c++11 -g -O2 -D_FORCE_INLINES -Xptxas "-v" --ptxas-options=-v
+NVCC_FLAGS += -std=c++11 -O2 -D_FORCE_INLINES -Xptxas "-v" --ptxas-options=-v
 CUDA_LINK_FLAGS := -dlink
 
 EXEC          := gpuminer

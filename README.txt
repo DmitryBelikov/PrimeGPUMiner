@@ -43,4 +43,4 @@ offsets.ini -change sieving offsets and sieving primes. probably don't want to
 ****TODO****
   -Windows Support
   -Pool Support
-  -Mixed GPU (CUDA) Support
+  -Segmented Sieve

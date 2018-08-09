@@ -25,7 +25,7 @@
 #define OFFSETS_MAX (1 << 18)  
 #define FRAME_COUNT 2
 #define BUFFER_COUNT 2
-#define GPU_MAX 8
+#define GPU_MAX 32
 struct FrameResource
 {
     //testing
@@ -44,7 +44,6 @@ struct FrameResource
   uint32_t *d_primes_found[FRAME_COUNT];
   uint32_t *h_primes_found[FRAME_COUNT];
   
-  
     //compacting
   uint64_t *d_nonce_offsets[FRAME_COUNT];
   uint32_t *d_nonce_meta[FRAME_COUNT];
@@ -53,8 +52,8 @@ struct FrameResource
   uint32_t *h_nonce_count[FRAME_COUNT];
 
    //sieving
+  uint32_t  *d_bit_array_sieve[FRAME_COUNT];
   uint16_t *d_prime_remainders[FRAME_COUNT];
-  uint8_t  *d_bit_array_sieve[FRAME_COUNT];
 };
 
 #endif
