@@ -48,6 +48,9 @@ extern uint32_t nThreadsKernelA[GPU_MAX];
 extern uint32_t nTestLevels[GPU_MAX];
 extern uint32_t nSieveIterationsLog2[GPU_MAX];
 
+extern uint64_t nBitArray_Stride;
+extern uint64_t nBitArray_StartIndex[GPU_MAX];
+
 extern std::atomic<uint32_t> nFourChainsFoundCounter;
 extern std::atomic<uint32_t> nFiveChainsFoundCounter;
 extern std::atomic<uint32_t> nSixChainsFoundCounter;
@@ -98,7 +101,6 @@ namespace Core
 	{
 	public:
 		uint32_t threadIndex;
-    uint32_t threadCount;
 		int threadAffinity;
 		CBlock* BLOCK;
 		bool fBlockFound, fNewBlock;
@@ -107,9 +109,8 @@ namespace Core
 		uint32_t nSearches;
     bool fReady;
 		
-		MinerThreadGPU(uint32_t tid, uint32_t tcount, int affinity) 
+		MinerThreadGPU(uint32_t tid, int affinity) 
     : threadIndex(tid)
-    , threadCount(tcount)
     , threadAffinity(affinity)
     , BLOCK(NULL) 
     , fBlockFound(false)
@@ -138,8 +139,7 @@ namespace Core
 					{
 						nDifficulty = BLOCK->nBits;
 						BLOCK->nNonce = 0;
-						PrimeSieve(threadIndex, 
-                       threadCount, 
+						PrimeSieve(threadIndex,  
                        BLOCK->GetPrime(), 
                        BLOCK->nBits, 
                        BLOCK->nHeight, 
@@ -233,7 +233,7 @@ namespace Core
 			int nthr = std::thread::hardware_concurrency();
 
 			for(uint32_t nIndex = 0; nIndex < nThreadsGPU; ++nIndex)
-				THREADS_GPU.push_back(new MinerThreadGPU(nIndex, nThreadsGPU, (affinity++)%nthr));
+				THREADS_GPU.push_back(new MinerThreadGPU(nIndex, (affinity++)%nthr));
 
       for(uint32_t nIndex = 0; nIndex < nThreadsCPU; ++nIndex)
       THREADS_CPU.push_back(new MinerThreadCPU(0, (affinity++)%nthr));
@@ -587,6 +587,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Unable to parse config.ini");
 	}
 
+  nBitArray_Stride = 0;
+
 	for (int i=0 ; i < nThreadsGPU; ++i)
 	{
 		const char *devicename = cuda_devicename(device_map[i]);
@@ -605,16 +607,22 @@ int main(int argc, char *argv[])
     nSharedSizeKB[i] = 32;
     nThreadsKernelA[i] = 512;
 
+    nBitArray_StartIndex[i] = nBitArray_Stride;
+    nBitArray_Stride += nBitArray_Size[i];
+
 		printf("\nGPU thread %d, device %d [%s]\n", i, device_map[i], devicename);
 		//printf("nPrimeLimitA = %d\n", nPrimeLimitA[i]);
 		printf("nPrimeLimitB = %d\n", nPrimeLimitB[i]);
 		printf("nBitArray_Size = %d\n", nBitArray_Size[i]);
+    printf("nBitArray_StartIndex = %lu\n", nBitArray_StartIndex[i]);
 		printf("nSieveIterations = %d\n", (1 << nSieveIterationsLog2[i]));
     printf("nTestLevels = %d\n", nTestLevels[i]);
 
 		if (nPrimeLimitB[i] > nPrimeLimit)
       nPrimeLimit = nPrimeLimitB[i];
 	}
+  
+  printf("\nnBitArray_Stride = %lu \n", nBitArray_Stride);
 
   quit.store(false);
 

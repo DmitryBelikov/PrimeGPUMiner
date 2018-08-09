@@ -34,7 +34,7 @@ uint32_t nBitArray_Size[GPU_MAX] = { 0 };
 mpz_t  zPrimorial;
 
 static uint64_t *static_nonce_offsets[GPU_MAX] =   {0,0,0,0,0,0,0,0};
-static uint32_t *static_nonce_meta[GPU_MAX] =           {0,0,0,0,0,0,0,0};
+static uint32_t *static_nonce_meta[GPU_MAX] =      {0,0,0,0,0,0,0,0};
 
 extern uint64_t base_offset;
 extern std::vector<uint32_t> offsetsTest;
@@ -43,14 +43,17 @@ extern std::vector<uint32_t> offsetsB;
 
 const uint32_t nPrimorialEndPrime = 8;
 
+uint64_t nBitArray_Stride;
+uint64_t nBitArray_StartIndex[GPU_MAX] = { 0 };
+
 uint32_t nPrimeLimitA[GPU_MAX] = { 0 };
 uint32_t nPrimeLimitB[GPU_MAX] = { 0 };
 uint32_t nSieveIterationsLog2[GPU_MAX] = { 0 };
 uint32_t nTestLevels[GPU_MAX] = { 0 };
 uint32_t nPrimeLimit = 0;
 
-uint32_t nSharedSizeKB[8] = { 48 };
-uint32_t nThreadsKernelA[8] = { 768 };
+uint32_t nSharedSizeKB[GPU_MAX] = { 32 };
+uint32_t nThreadsKernelA[GPU_MAX] = { 512 };
 
 std::atomic<uint32_t> nFourChainsFoundCounter;
 std::atomic<uint32_t> nFiveChainsFoundCounter;
@@ -520,7 +523,8 @@ namespace Core
     cuda_free_fermat(threadIndex);
   }
 
-	void PrimeSieve(uint32_t threadIndex, uint32_t threadCount, CBigNum BaseHash, uint32_t nDifficulty, uint32_t nHeight, uint512 merkleRoot)
+	void PrimeSieve(uint32_t threadIndex, CBigNum BaseHash, 
+                  uint32_t nDifficulty, uint32_t nHeight, uint512 merkleRoot)
 	{
     std::vector<uint32_t> limbs(WORD_MAX);
     size_t size = 0; 
@@ -595,21 +599,21 @@ namespace Core
     {
         //sieve bit array and compact test candidate nonces
 	    sieve_finished = cuda_compute_primesieve(threadIndex,
-                                               threadCount,
                                                shared_kb,
                                                nThreadsKernelA[threadIndex], 
                                                base_offset,
                                                primorial, 
-                                               nPrimorialEndPrime,  
+                                               nPrimorialEndPrime,        
                                                primeLimitA, 
                                                primeLimitB,
-				                                       bit_array_size, 
+				                                       bit_array_size,
+                                               nBitArray_Stride,
+                                               nBitArray_StartIndex[threadIndex], 
                                                nDifficulty,
                                                sieve_index,
                                                test_index);
 
         //after the number of iterations have been satisfied, start filling next queue
-      
       if(sieve_index > 0 && sieve_index % nIterations == 0 && sieve_finished)
       {
           //test results
@@ -675,7 +679,7 @@ namespace Core
       //}
 
         /*change frequency of looping for better GPU utilization, can lead to
-          lower latency from calling thread waking a blocking-sync thread */ 
+          lower latency than from a calling thread waking a blocking-sync thread */ 
       Sleep(1); 
     }
 

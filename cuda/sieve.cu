@@ -656,15 +656,14 @@ extern "C" void cuda_set_offsets(uint32_t thr_id, uint32_t *OffsetsA, uint32_t A
 }
 
 __global__ void compact_offsets(uint64_t *d_nonce_offsets, uint32_t *d_nonce_meta, uint32_t *d_nonce_count, 
-                                uint8_t *d_bit_array_sieve, uint32_t max_count, uint32_t sieve_index)
+                                uint8_t *d_bit_array_sieve, uint32_t max_count, uint64_t sieve_start_index)
 {
   uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if(idx < max_count)
   {
     uint32_t *d_word_array_sieve = (uint32_t *)d_bit_array_sieve;
-    uint64_t nonce_offset = static_cast<uint64_t>(max_count) * 
-                            static_cast<uint64_t>(sieve_index) + idx;
+    uint64_t nonce_offset = sieve_start_index + idx;
 
     if((d_word_array_sieve[idx >> 5] & (1 << (idx & 31))) == 0)
     {
@@ -682,7 +681,6 @@ __global__ void compact_offsets(uint64_t *d_nonce_offsets, uint32_t *d_nonce_met
 
 
 extern "C" bool cuda_compute_primesieve(uint32_t thr_id,
-                                        uint32_t thr_count, 
                                         uint32_t nSharedSizeKB,
                                         uint32_t nThreadsKernelA, 
                                         uint64_t base_offset,
@@ -690,7 +688,9 @@ extern "C" bool cuda_compute_primesieve(uint32_t thr_id,
                                         uint32_t nPrimorialEndPrime, 
                                         uint32_t nPrimeLimitA, 
                                         uint32_t nPrimeLimitB, 
-                                        uint32_t nBitArray_Size, 
+                                        uint32_t nBitArray_Size,
+                                        uint64_t nBitArray_Stride,
+                                        uint64_t nBitArray_StartIndex, 
                                         uint32_t nDifficulty,
                                         uint32_t sieve_index,
                                         uint32_t test_index)
@@ -718,8 +718,9 @@ extern "C" bool cuda_compute_primesieve(uint32_t thr_id,
   if(cudaEventQuery(d_compact_Event[thr_id][curr_sieve]) == cudaErrorNotReady)
     return false;
 
-  sieve_index = sieve_index * thr_count + thr_id;
-  uint64_t base_offsetted = base_offset + primorial * (uint64_t)nBitArray_Size * (uint64_t)sieve_index;
+    //works for UNIFORM and NON-UNIFORM bit array sizes
+  uint64_t primorial_start_index = nBitArray_Stride * (uint64_t)sieve_index + nBitArray_StartIndex;  
+  uint64_t base_offsetted = base_offset + primorial * primorial_start_index;
 
   if(base_offsetted >= 0xF000000000000000)
     printf("Search Range Almost Exhausted!!! Try using a smaller Primorial\n");
@@ -763,7 +764,7 @@ extern "C" bool cuda_compute_primesieve(uint32_t thr_id,
       frameResources[thr_id].d_nonce_count[curr_test], 
       frameResources[thr_id].d_bit_array_sieve[curr_sieve],
       nBitArray_Size,
-      sieve_index);
+      primorial_start_index);
   
   CHECK(cudaMemcpyAsync(frameResources[thr_id].h_nonce_count[curr_test], 
                         frameResources[thr_id].d_nonce_count[curr_test], 

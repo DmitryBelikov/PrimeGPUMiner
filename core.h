@@ -110,7 +110,6 @@ public:
   void PrimeInit(int threadIndex);
 
 	void PrimeSieve(uint32_t threadIndex, 
-                  uint32_t threadCount, 
                   CBigNum BaseHash, 
                   uint32_t nDifficulty, 
                   uint32_t nHeight, 
