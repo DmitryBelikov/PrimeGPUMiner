@@ -327,17 +327,15 @@ __device__ void calcBar(uint32_t *a, uint32_t *b, uint32_t *n, uint32_t *t)
       
     lshift(t, n, (WORD_MAX<<5) - bit_count(n));
     sub_n(a, a, t);
-    
-      //calculate R mod N;
-    while(cmp_ge_n(a, n))
+        
+    while(cmp_ge_n(a, n))  //calculate R mod N;
     {
         rshift1(t, t);
         if(cmp_ge_n(a, t))
           sub_n(a, a, t);
     }
     
-      //calculate 2R mod N;
-    lshift1(b, a);
+    lshift1(b, a);     //calculate 2R mod N;
     if(cmp_ge_n(b, n))
       sub_n(b, b, n);
 }
@@ -418,12 +416,13 @@ __global__ void fermat_kernel(uint64_t *in_nonce_offsets,
     uint32_t p[WORD_MAX];
 
       //decode meta_data
-    uint32_t chain_offset = nonce_meta >> 16;
+    uint32_t chain_offset_beg = nonce_meta >> 24;
+    uint32_t chain_offset_end = (nonce_meta >> 16) & 0xFF;
     uint32_t prime_gap = (nonce_meta >> 8) & 0xFF;
     uint32_t chain_length = nonce_meta & 0xFF;
 
     uint64_t primorial_offset = nPrimorial * nonce_offset;
-    primorial_offset += c_offsets[chain_offset];
+    primorial_offset += c_offsets[chain_offset_end];
 
     if(c_quit == true)
       return;
@@ -438,29 +437,37 @@ __global__ void fermat_kernel(uint64_t *in_nonce_offsets,
       prime_gap = 0;
     }
     atomicAdd(g_primes_checked, 1);
+
+    if(chain_length == 0)
+    {
+      ++chain_offset_beg;
+      prime_gap = 0;
+    }
     
     if(chain_length == nTestLevels)
     {
         //encode meta_data
       nonce_meta = 0;
-      nonce_meta |= (chain_offset << 16);
+      nonce_meta |= (chain_offset_beg << 24);
+      nonce_meta |= (chain_offset_end << 16);
       nonce_meta |= (prime_gap << 8);
       nonce_meta |= chain_length;
 
       add_result(g_result_offsets, g_result_meta, g_result_count, nonce_offset, nonce_meta);
     }
 
-    ++chain_offset;
+    ++chain_offset_end;
 
-    if(chain_offset < nTestOffsets)
+    if(chain_offset_end < nTestOffsets && chain_offset_beg <= (nTestOffsets - nTestLevels))
     {
-      prime_gap += c_offsets[chain_offset] - c_offsets[chain_offset-1];
+      prime_gap += c_offsets[chain_offset_end] - c_offsets[chain_offset_end-1];
 
-      if(chain_length > 0 && chain_length < nTestLevels && prime_gap <= 12)
+      if(chain_length < nTestLevels && prime_gap <= 12)
       {   
           //encode meta_data
         nonce_meta = 0;
-        nonce_meta |= (chain_offset << 16);
+        nonce_meta |= (chain_offset_beg << 24);
+        nonce_meta |= (chain_offset_end << 16);
         nonce_meta |= (prime_gap << 8);
         nonce_meta |= chain_length;
   

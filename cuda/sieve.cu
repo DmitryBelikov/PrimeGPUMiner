@@ -40,7 +40,7 @@ static __device__ uint64_t MAKE_ULONGLONG(uint32_t LO, uint32_t HI)
 }
 
 template<uint32_t sharedSizeKB, uint32_t nThreadsPerBlock, uint32_t offsetsA>
-__global__ void primesieve_kernelA(uint8_t *g_bit_array_sieve, uint32_t nBitArray_Size, uint4 *primes, uint16_t *prime_remainders, uint32_t *base_remainders, uint32_t nPrimorialEndPrime, uint32_t nPrimeLimitA);
+__global__ void primesieve_kernelA(uint8_t *g_bit_array_sieve, uint32_t nBitArray_Size, uint4 *primes, uint16_t *prime_remainders, uint32_t nPrimorialEndPrime, uint32_t nPrimeLimitA);
 
 __device__ __forceinline__
 uint32_t mod_p_small(uint64_t a, uint32_t p, uint64_t recip) 
@@ -364,7 +364,7 @@ uint32_t nPrimeLimitA, uint32_t offsetsA)
 }
 
 template<uint32_t sharedSizeKB, uint32_t nThreadsPerBlock, uint32_t offsetsA>
-__global__ void primesieve_kernelA(uint32_t *g_bit_array_sieve, uint32_t nBitArray_Size, uint4 *primes, uint16_t *prime_remainders, uint32_t *base_remainders, uint32_t nPrimorialEndPrime, uint32_t nPrimeLimitA)
+__global__ void primesieve_kernelA(uint32_t *g_bit_array_sieve, uint32_t nBitArray_Size, uint4 *primes, uint16_t *prime_remainders, uint32_t nPrimorialEndPrime, uint32_t nPrimeLimitA)
 {
 	extern __shared__ uint32_t shared_array_sieve[];
 
@@ -388,7 +388,7 @@ __global__ void primesieve_kernelA(uint32_t *g_bit_array_sieve, uint32_t nBitArr
   //{
 #pragma unroll 16
 		for (int i=0; i < 16; ++i) 
-      shared_array_sieve[threadIdx.x+i*512] = 0;
+      shared_array_sieve[threadIdx.x + (i << 9)] = 0;
 	//}
 	__syncthreads();
 		
@@ -417,11 +417,14 @@ __global__ void primesieve_kernelA(uint32_t *g_bit_array_sieve, uint32_t nBitArr
 
 		Unroller<0, offsetsA>::step(pre);
 
-		auto loop = [&sizeSieve, &pIdx, &nAdd, &prime_remainders, &pre1, &pre2, &pr](uint32_t o)
+    uint32_t tmp, index;
+		auto loop = [&sizeSieve, &pIdx, &nAdd, &pre1, &pre2, &pr, &tmp, &index](uint32_t o)
     {
-			uint32_t tmp = pre1[o] + pre2;
-			tmp = (tmp >= pr) ? (tmp - pr) : tmp;
-			for(uint32_t index = tmp + pIdx; index < sizeSieve; index += nAdd)				
+			tmp = pre1[o] + pre2;
+      if(tmp >= pr)
+        tmp = tmp - pr;
+
+			for(index = tmp + pIdx; index < sizeSieve; index += nAdd)				
 				atomicOr(&shared_array_sieve[index >> 5], 1 << (index & 31));
 		};
 
@@ -477,8 +480,33 @@ __global__ void primesieve_kernelB(uint32_t *g_bit_array_sieve,
 		uint32_t inv = tmp.y;
 		uint64_t recip = MAKE_ULONGLONG(tmp.z, tmp.w);
 		uint32_t remainder = mod_p_small(base_offset + base_remainders[i] + c_offsetsB[o], p, recip);
-		uint32_t index = mod_p_small((uint64_t)(p - remainder)*inv, p, recip);
+		uint32_t index = mod_p_small((uint64_t)(p - remainder)*inv, p, recip);  
 
+   // uint4 vindex = { index,
+   //                  index + p,
+   //                  index + p * 2,
+   //                  index + p * 3 };
+
+   // const uint32_t add = 4 * p;
+   // while(vindex.w < nBitArray_Size)
+   // {
+    //  atomicOr(&g_bit_array_sieve[vindex.x >> 5], 1 << (vindex.x & 31));
+    //  atomicOr(&g_bit_array_sieve[vindex.y >> 5], 1 << (vindex.y & 31));
+    //  atomicOr(&g_bit_array_sieve[vindex.z >> 5], 1 << (vindex.z & 31));
+    //  atomicOr(&g_bit_array_sieve[vindex.w >> 5], 1 << (vindex.w & 31));
+    //  vindex.x += add;
+    //  vindex.y += add;
+    //  vindex.z += add;
+    //  vindex.w += add;
+    //}
+
+    //if(vindex.x < nBitArray_Size)
+    //  atomicOr(&g_bit_array_sieve[vindex.x >> 5], 1 << (vindex.x & 31));
+    //if(vindex.y < nBitArray_Size)
+    //  atomicOr(&g_bit_array_sieve[vindex.y >> 5], 1 << (vindex.y & 31));
+    //if(vindex.z < nBitArray_Size)
+    //  atomicOr(&g_bit_array_sieve[vindex.z >> 5], 1 << (vindex.z & 31));
+                  
 		for (; index < nBitArray_Size; index += p)
 		{
 			atomicOr(&g_bit_array_sieve[index >> 5], 1 << (index & 31));
@@ -508,40 +536,49 @@ void kernelA_launcher(uint32_t thr_id,
     switch(nOffsetsA)
     {
       case 1:
-		primesieve_kernelA<32, 1024, 1><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 1><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 2:
-		primesieve_kernelA<32, 1024, 2><<<grid, block, sharedSizeBits/8>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 2><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 3:
-		primesieve_kernelA<32, 1024, 3><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 3><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 4:
-		primesieve_kernelA<32, 1024, 4><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 4><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 5:
-		primesieve_kernelA<32, 1024, 5><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 5><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 6:
-		primesieve_kernelA<32, 1024, 6><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 6><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 7:
-		primesieve_kernelA<32, 1024, 7><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 7><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 8:
-		primesieve_kernelA<32, 1024, 8><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 8><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 9:
-		primesieve_kernelA<32, 1024, 9><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 9><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 10:
-		primesieve_kernelA<32, 1024, 10><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 10><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 11:
-		primesieve_kernelA<32, 1024, 11><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 11><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 12:
-		primesieve_kernelA<32, 1024, 12><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 1024, 12><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 13:
+		primesieve_kernelA<32, 1024, 13><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 14:
+		primesieve_kernelA<32, 1024, 14><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 15:
+		primesieve_kernelA<32, 1024, 15><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
     }
 	}
@@ -550,40 +587,49 @@ void kernelA_launcher(uint32_t thr_id,
     switch(nOffsetsA)
     {
       case 1:
-		primesieve_kernelA<48, 768, 1><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 1><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 2:
-		primesieve_kernelA<48, 768, 2><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 2><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 3:
-		primesieve_kernelA<48, 768, 3><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 3><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 4:
-		primesieve_kernelA<48, 768, 4><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 4><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 5:
-		primesieve_kernelA<48, 768, 5><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 5><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 6:
-		primesieve_kernelA<48, 768, 6><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 6><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 7:
-		primesieve_kernelA<48, 768, 7><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 7><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 8:
-		primesieve_kernelA<48, 768, 8><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 8><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 9:
-		primesieve_kernelA<48, 768, 9><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 9><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 10:
-		primesieve_kernelA<48, 768, 10><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 10><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 11:
-		primesieve_kernelA<48, 768, 11><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 11><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 12:
-		primesieve_kernelA<48, 768, 12><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<48, 768, 12><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 13:
+		primesieve_kernelA<48, 768, 13><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 14:
+		primesieve_kernelA<48, 768, 14><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 15:
+		primesieve_kernelA<48, 768, 15><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
     }
 	}
@@ -592,40 +638,49 @@ void kernelA_launcher(uint32_t thr_id,
 		    switch(nOffsetsA)
     {
       case 1:
-		primesieve_kernelA<32, 512, 1><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 1><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 2:
-		primesieve_kernelA<32, 512, 2><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 2><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 3:
-		primesieve_kernelA<32, 512, 3><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 3><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 4:
-		primesieve_kernelA<32, 512, 4><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 4><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 5:
-		primesieve_kernelA<32, 512, 5><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 5><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 6:
-		primesieve_kernelA<32, 512, 6><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 6><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 7:
-		primesieve_kernelA<32, 512, 7><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 7><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 8:
-		primesieve_kernelA<32, 512, 8><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 8><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 9:
-		primesieve_kernelA<32, 512, 9><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 9><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 10:
-		primesieve_kernelA<32, 512, 10><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 10><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index],nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 11:
-		primesieve_kernelA<32, 512, 11><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 11><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
       case 12:
-		primesieve_kernelA<32, 512, 12><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], d_base_remainders[thr_id], nPrimorialEndPrime, nPrimeLimitA);
+		primesieve_kernelA<32, 512, 12><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 13:
+		primesieve_kernelA<32, 512, 13><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 14:
+		primesieve_kernelA<32, 512, 14><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
+      break;
+      case 15:
+		primesieve_kernelA<32, 512, 15><<<grid, block, sharedSizeBits/8, d_sieveA_Stream[thr_id]>>>(frameResources[thr_id].d_bit_array_sieve[frame_index], nBitArray_Size, d_primesInverseInvk[thr_id], frameResources[thr_id].d_prime_remainders[frame_index], nPrimorialEndPrime, nPrimeLimitA);
       break;
     }
 	}
@@ -642,7 +697,7 @@ extern "C" void cuda_set_offsets(uint32_t thr_id, uint32_t *OffsetsA, uint32_t A
     nOffsetsA = A_count;
     nOffsetsB = B_count;
 
-    if(nOffsetsA > 12)
+    if(nOffsetsA > 15)
       exit(1);
     if(nOffsetsB > 8)
       exit(1);
@@ -694,14 +749,14 @@ extern "C" bool cuda_compute_primesieve(uint32_t thr_id,
                                         uint32_t test_index)
 {
   int nThreads = nPrimeLimitB - nPrimeLimitA;
-  int nThreadsPerBlock = 32 * 8;        
+  int nThreadsPerBlock = 256;        
   int nBlocks = (nThreads + nThreadsPerBlock - 1) / (nThreadsPerBlock / 8);
 
   dim3 block(nThreadsPerBlock);
   dim3 grid(nBlocks);
   dim3 block2(nPrimeLimitA);
 	dim3 grid2(1);
-  dim3 block3(256);
+  dim3 block3(128);
   dim3 grid3((nBitArray_Size + block.x - 1) / block.x);
 
   uint32_t curr_sieve = sieve_index % FRAME_COUNT;

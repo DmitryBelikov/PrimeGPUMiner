@@ -48,3 +48,11 @@
    -added Mixed GPU support (CUDA only)
 
    -added up to 32 GPU support (for those with ridiculous mining rigs)
+
+08/24/18
+
+   -updated GPU testing with capability to test beyond first failed prime for
+    sub-chain checks within a large chain offset pattern (larger than 8)
+
+   -updated metrics to match previous CPU miner for better visual unification,
+    WPS, Largest Share, ch/m, ratio all added 

@@ -12,9 +12,11 @@
 
 #include <inttypes.h>
 #include <queue>
+#include <deque>
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <numeric>
 
 #include "cuda/frame_resources.h"
 
@@ -25,11 +27,11 @@ FILE _iob[] = { *stdin, *stdout, *stderr };
 extern "C" FILE * __cdecl __iob_func(void) { return _iob; }
 #endif
 
-volatile uint32_t nBlocksFoundCounter = 0;
 volatile uint32_t nBlocksAccepted = 0;
 volatile uint32_t nBlocksRejected = 0;
 volatile uint32_t nDifficulty = 0;
 volatile uint32_t nBestHeight = 0;
+volatile uint32_t nLargest = 0;
 extern volatile uint32_t nInternalPrimeLimit;
 volatile bool isBlockSubmission = false;
 uint32_t nStartTimer = 0;
@@ -38,6 +40,7 @@ std::atomic<uint64_t> Tests_CPU;
 std::atomic<uint64_t> Tests_GPU;
 std::atomic<uint64_t> PrimesFound;
 std::atomic<uint64_t> PrimesChecked;
+std::atomic<uint64_t> nWeight;
 
 extern uint32_t nBitArray_Size[GPU_MAX];
 extern uint32_t nPrimeLimitA[GPU_MAX];
@@ -51,12 +54,7 @@ extern uint32_t nSieveIterationsLog2[GPU_MAX];
 extern uint64_t nBitArray_Stride;
 extern uint64_t nBitArray_StartIndex[GPU_MAX];
 
-extern std::atomic<uint32_t> nFourChainsFoundCounter;
-extern std::atomic<uint32_t> nFiveChainsFoundCounter;
-extern std::atomic<uint32_t> nSixChainsFoundCounter;
-extern std::atomic<uint32_t> nSevenChainsFoundCounter;
-extern std::atomic<uint32_t> nEightChainsFoundCounter;
-extern std::atomic<uint32_t> nNineChainsFoundCounter;
+extern std::atomic<uint32_t> chain_counter[14];
 
 extern std::atomic<bool> quit;
 
@@ -64,6 +62,8 @@ uint64_t base_offset = 0;
 std::vector<uint32_t> offsetsTest;
 std::vector<uint32_t> offsetsA;
 std::vector<uint32_t> offsetsB;
+
+std::deque<double> vWPSValues;
 
 #if WIN32
 static inline void affine_to_cpu(int id, int cpu)
@@ -215,6 +215,7 @@ namespace Core
     std::vector<MinerThreadCPU*> THREADS_CPU;
 		LLP::Thread_t THREAD;
 		LLP::Timer    TIMER;
+    LLP::Timer PrimeTimer;
 		std::string   IP, PORT;
     bool fNewBlock;
 		
@@ -278,6 +279,7 @@ namespace Core
 				
 			/** Initialize a Timer for the Hash Meter. **/
 			TIMER.Start();
+      PrimeTimer.Start();
 			
 			loop
 			{
@@ -321,13 +323,29 @@ namespace Core
 						ResetThreads();
 					}
 
+          if(PrimeTimer.Elapsed() >= 1)
+          {
+            uint32_t nElapsed = PrimeTimer.Elapsed();
+
+            double WPS = nWeight.load() / (double)(nElapsed * 10000000);
+
+            if(vWPSValues.size() >= 300)
+              vWPSValues.pop_front();
+
+            vWPSValues.push_back(WPS);
+
+            nWeight.store(0);
+
+            PrimeTimer.Reset();
+          }
+
 					/** Rudimentary Meter **/
 					if(TIMER.Elapsed() >= 15)
 					{
 						time_t now = time(0);
 						uint32_t SecondsElapsed = (uint32_t)now - nStartTimer;
 						uint32_t nElapsed = TIMER.Elapsed();
-							
+            	
 						uint64_t gibps = SievedBits.load() / nElapsed;
 						SievedBits = 0;
 
@@ -353,29 +371,53 @@ namespace Core
             if(checked)
               pratio = (double)(100 * found) / checked;
 
-						printf("\n[METERS] %u Block(s) A=%u R=%u | Height = %u | Diff = %f | %02d:%02d:%02d\n", 
-              nBlocksFoundCounter,
-              nBlocksAccepted,
-              nBlocksRejected,
-              nBestHeight, 
-              (double)nDifficulty/10000000.0, 
-              (SecondsElapsed/3600)%60, 
-              (SecondsElapsed/60)%60, 
-              (SecondsElapsed)%60);
+            double WPS = 1.0 * std::accumulate(vWPSValues.begin(), vWPSValues.end(), 0LL) / vWPSValues.size();
 
-						printf("[METERS] Sieved %5.2f GiB/s | Tested %lu T/s GPU, %lu T/s CPU | Ratio: %.3f %%\n", 
+            uint32_t maxChToPrint = 9;
+
+						printf("\n[METERS] %-5.02f WPS | Largest %f | Diff = %f | Height = %u | Block(s) A=%u R=%u | %02dd-%02d:%02d:%02d\n",
+              WPS,          
+              nLargest / 10000000.0,
+              (double)nDifficulty/10000000.0,
+              nBestHeight, 
+              nBlocksAccepted,
+              nBlocksRejected, 
+              SecondsElapsed/86400,     //days
+              (SecondsElapsed/3600)%24, //hours 
+              (SecondsElapsed/60)%60,   //minutes
+              (SecondsElapsed)%60);     //seconds
+
+		        printf("\n-----------------------------------------------------------------------------------------------\nch  \t| ");
+		for (int i = 3; i <= maxChToPrint; i++)
+			printf("%-7d  |  ", i);
+		printf("\n---------------------------------------------------------------------------------------------\ncount\t| ");
+		for (int i = 3; i <= maxChToPrint; i++)
+			printf("%-7d  |  ", chain_counter[i].load());
+		printf("\n---------------------------------------------------------------------------------------------\nch/m\t| ");
+		for (int i = 3; i <= maxChToPrint; i++)
+		{
+			double sharePerHour = ((double)chain_counter[i].load() / SecondsElapsed) * 60.0;
+			printf("%-7.02f  |  ", sharePerHour);
+    }
+    printf("\n---------------------------------------------------------------------------------------------\nratio\t| ");
+            
+		for (int i = 3; i <= maxChToPrint; i++)
+		{
+			double chRatio = 0;
+ 
+      uint32_t c = chain_counter[i].load();
+      uint32_t c2 = chain_counter[i - 1].load();
+
+			if (c != 0)
+				chRatio = ((double)c2 / (double)c);
+			printf("%-7.03f  |  ", chRatio);
+    }
+    printf("\n---------------------------------------------------------------------------------------------\n");
+						printf("Sieved %5.2f GiB/s | Tested %lu T/s GPU, %lu T/s CPU | Ratio: %.3f %%\n", 
               (double)gibps / (1 << 30), 
               tps_gpu,
               tps_cpu, 
               pratio);
-
-						printf("[METERS] Clusters Found: Four=%u | Five=%u | Six=%u | Seven=%u | Eight=%u | Nine=%u\n", 
-              nFourChainsFoundCounter.load(), 
-              nFiveChainsFoundCounter.load(), 
-              nSixChainsFoundCounter.load(), 
-              nSevenChainsFoundCounter.load(),
-              nEightChainsFoundCounter.load(),
-              nNineChainsFoundCounter.load());
 						
 						TIMER.Reset();
 					}
@@ -406,8 +448,6 @@ namespace Core
 						boost::mutex::scoped_lock lock(work_mutex);
 						while(result_queue.empty() == false)
 						{
-							++nBlocksFoundCounter;
-
 							printf("\nSubmitting Block...\n");
 							work_info work = result_queue.front();
 							result_queue.pop();

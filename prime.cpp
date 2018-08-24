@@ -23,18 +23,15 @@
 #include <algorithm>
 #include <inttypes.h>
 
-using namespace std;
-
 uint32_t *primes;
 uint32_t *inverses;
 uint64_t *invK;
 
-
 uint32_t nBitArray_Size[GPU_MAX] = { 0 };
 mpz_t  zPrimorial;
 
-static uint64_t *static_nonce_offsets[GPU_MAX] =   {0,0,0,0,0,0,0,0};
-static uint32_t *static_nonce_meta[GPU_MAX] =      {0,0,0,0,0,0,0,0};
+static uint64_t *static_nonce_offsets[GPU_MAX] =   { 0 };
+static uint32_t *static_nonce_meta[GPU_MAX] =      { 0 };
 
 extern uint64_t base_offset;
 extern std::vector<uint32_t> offsetsTest;
@@ -55,19 +52,18 @@ uint32_t nPrimeLimit = 0;
 uint32_t nSharedSizeKB[GPU_MAX] = { 32 };
 uint32_t nThreadsKernelA[GPU_MAX] = { 512 };
 
-std::atomic<uint32_t> nFourChainsFoundCounter;
-std::atomic<uint32_t> nFiveChainsFoundCounter;
-std::atomic<uint32_t> nSixChainsFoundCounter;
-std::atomic<uint32_t> nSevenChainsFoundCounter;
-std::atomic<uint32_t> nEightChainsFoundCounter;
-std::atomic<uint32_t> nNineChainsFoundCounter;
+std::atomic<uint32_t> chain_counter[14];
 
-extern volatile unsigned int nBestHeight;
+extern volatile uint32_t nLargest;
+extern volatile uint32_t nBestHeight;
 extern std::atomic<uint64_t> SievedBits;
+extern std::atomic<uint64_t> Tests_CPU;
+extern std::atomic<uint64_t> Tests_GPU;
 extern std::atomic<uint64_t> PrimesFound;
 extern std::atomic<uint64_t> PrimesChecked;
-extern std::atomic<uint64_t> Tests_GPU;
-extern std::atomic<uint64_t> Tests_CPU;
+extern std::atomic<uint64_t> nWeight;
+
+
 std::atomic<bool> quit;
 
 uint64_t mpz2ull(mpz_t z)
@@ -85,9 +81,6 @@ uint32_t *make_primes(uint32_t limit) {
 	memcpy(&primes[1], &primevec[0], limit*sizeof(uint32_t));
 	return primes;
 }
-
-#define MAX(a,b) ( (a) > (b) ? (a) : (b) )
-#define MIN(a,b) ( (a) < (b) ? (a) : (b) )
 
 namespace Core
 {
@@ -371,24 +364,27 @@ namespace Core
 		uint64_t nStop = 0;
 		uint64_t offset = work.nonce_offset;
 
-    uint32_t prime_gap = (work.nonce_meta >> 8) & 0xFF;
-    uint32_t chain_offset = work.nonce_meta >> 16;
+    //uint32_t prime_gap = (work.nonce_meta >> 8) & 0xFF;
+
+    uint32_t chain_offset_beg = work.nonce_meta >> 24;
+    uint32_t chain_offset_end = (work.nonce_meta >> 16) & 0xFF;
     uint32_t chain_length = work.nonce_meta & 0xFF;
 
     uint32_t thr_id = work.gpu_thread;
 
-    //if(chain_offset == 0)
-    //  printf("chain offset is 0, may be counting chain lengths twice!\n");
 
     if(work.nHeight != nBestHeight || nBestHeight == 0 || quit.load())
       return scanned;
+
+    chain_offset_beg = offsetsTest[chain_offset_beg];
     
     mpz_mul_ui(zTempVar, zPrimorial, offset);
 		mpz_add(zTempVar, zFirstSieveElement, zTempVar);
+    mpz_add_ui(zTempVar, zTempVar, chain_offset_beg);
     mpz_set(zPrimeOriginOffset, zTempVar);
     
-    chain_offset = offsetsTest[chain_offset] + 2;
-    mpz_add_ui(zTempVar, zTempVar, chain_offset);
+    chain_offset_end = offsetsTest[chain_offset_end] + 2;
+    mpz_add_ui(zTempVar, zTempVar, chain_offset_end);
 
     for(; nStart<=nStop+12; nStart += 2)
     {
@@ -405,47 +401,37 @@ namespace Core
       ++Tests_CPU;
 
       mpz_add_ui(zTempVar, zTempVar, 2);
-      chain_offset += 2;
+      chain_offset_end += 2;
     }
 
-    if (chain_length >= 4)
-	  {
-	    ++scanned;
-  
-      mpz_sub(zTempVar, zPrimeOriginOffset, zPrimeOrigin);
-			nNonce = mpz_get_ui(zTempVar);
-			nSieveDifficulty = SetBits(GetPrimeDifficulty2(work.BaseHash + nNonce + chain_offset, chain_length));
-      //printf("sieve difficulty: %d\n", nSieveDifficulty);
+    mpz_sub(zTempVar, zPrimeOriginOffset, zPrimeOrigin);
+	  nNonce = mpz_get_ui(zTempVar);
+    nSieveDifficulty = SetBits(GetPrimeDifficulty2(work.BaseHash + nNonce + chain_offset_end, chain_length));
 
-			if (nSieveDifficulty >= 40000000)
-				++nFourChainsFoundCounter;
-			if (nSieveDifficulty >= 50000000)
-				++nFiveChainsFoundCounter;
-			if (nSieveDifficulty >= 60000000)
-			  ++nSixChainsFoundCounter;
-	    if (nSieveDifficulty >= 70000000)
-				++nSevenChainsFoundCounter;
-		  if (nSieveDifficulty >= 80000000)
-		    ++nEightChainsFoundCounter;
-      if (nSieveDifficulty >= 90000000)
-        ++nNineChainsFoundCounter;
+    if(chain_length >= 3)
+      nWeight += nSieveDifficulty * 50; 
 
-		  if (nSieveDifficulty >= 60000000)
-      {
-			  printf("\n  %d-Chain Found: %f  Nonce: %016lX  %s[%d]\n\n", 
-            (int)chain_length, 
-            (double)nSieveDifficulty / 1e7, 
-            nNonce,
-            cuda_devicename(thr_id),
-            thr_id);
-      }
+    if(nSieveDifficulty > nLargest)
+     nLargest = nSieveDifficulty;
 
-			if(nSieveDifficulty >= work.nDifficulty)
-			{
-				work.nNonce = nNonce;
-	  	  work.nNonceDifficulty = nSieveDifficulty;
-		  }
+    ++chain_counter[chain_length];
+
+
+	  if (nSieveDifficulty >= 60000000)
+    {
+			printf("\n[METERS] %d-Chain Found: %f  Nonce: %016lX  %s[%d]\n\n", 
+          (int)chain_length, 
+          (double)nSieveDifficulty / 1e7, 
+          nNonce,
+          cuda_devicename(thr_id),
+          thr_id);
     }
+
+	  if(nSieveDifficulty >= work.nDifficulty)
+		{
+		  work.nNonce = nNonce;
+	  	work.nNonceDifficulty = nSieveDifficulty;
+		}
  
 #if TIMING
 		QueryPerformanceCounter(&work.EndingTime);
@@ -458,6 +444,8 @@ namespace Core
 		mpz_clear(zTwo);
 		mpz_clear(zN);
 		mpz_clear(zTempVar);
+
+    ++scanned;
 
 		return scanned;
 	}
@@ -637,9 +625,10 @@ namespace Core
         //uint16_t lengths[8] = {0,0,0,0,0,0,0,0};
         for(int i = 0; i < count; ++i)
         {
-          uint32_t chain_offset = nonce_meta[i] >> 16;
-          uint32_t prime_gap = (nonce_meta[i] >> 8) & 0xFF;
-          uint32_t chain_length = nonce_meta[i] & 0xFF;
+          //uint32_t chain_offset_beg = (nonce_meta[i] >> 24);
+          //uint32_t chain_offset_end = (nonce_meta[i] >> 16) & 0xFF;
+          //uint32_t prime_gap = (nonce_meta[i] >> 8) & 0xFF;
+          //uint32_t chain_length = nonce_meta[i] & 0xFF;
 
 
           //++lengths[chain_length];

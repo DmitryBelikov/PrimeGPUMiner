@@ -22,7 +22,7 @@
   }                                                                       \
 }
 
-#define OFFSETS_MAX (1 << 18)  
+#define OFFSETS_MAX (1 << 19)  
 #define FRAME_COUNT 2
 #define BUFFER_COUNT 2
 #define GPU_MAX 32
